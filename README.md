@@ -75,6 +75,87 @@ cmake --build build -j$(nproc)
 The programs are `build/bin/coiledcoin2d` and `build/bin/coiledcoin2-cli`. Data is kept in
 `~/.coiledcoin2` (Linux) or `%LOCALAPPDATA%\CoiledCoin2` (Windows), settings in `coiledcoin2.conf`.
 
+## For pool operators
+
+CoiledCoin II is built to be merge-mined alongside Bitcoin (or any SHA-256 parent chain that
+supports Namecoin-style AuxPoW). Adding it costs your miners no Bitcoin hashrate, and every
+independent pool makes the chain safer. **Please add it - you don't need to ask anyone first.**
+
+### The essentials
+
+| | |
+|---|---|
+| Algorithm | SHA-256d |
+| Merge-mining | Namecoin-style AuxPoW, **chain ID 16 (0x0010)**, strict chain ID, active from block 1 |
+| Block time / difficulty | 2 minutes, LWMA-1 per-block retarget (copes with pools joining and leaving) |
+| Reward | 20 CLC2 (halving every 525,000 blocks, never below 1 CLC2) |
+| P2P / RPC ports | 8370 / 8371 |
+| Public node | `clc2seed.shears.co.uk:8370` - put `addnode=clc2seed.shears.co.uk:8370` in `coiledcoin2.conf` |
+| Addresses | `C...` (legacy P2PKH) or `clc1...` (SegWit) |
+| Coinbase maturity | 100 blocks (as Bitcoin) |
+
+### Merge-mining RPC (same as Namecoin)
+
+```text
+createauxblock <payout address>   -> {"hash", "chainid": 16, "previousblockhash",
+                                       "coinbasevalue", "bits", "height", "_target"}
+submitauxblock <hash> <auxpow hex> -> true if the block was accepted
+getauxblock                        -> wallet-paid variant (needs the node wallet)
+```
+
+Your pool commits the `hash` from `createauxblock` in its parent-chain coinbase in the usual
+merged-mining way (`fabe6d6d` + merkle root + tree size + nonce), and when a share meets the
+CLC2 target it sends the AuxPoW proof with `submitauxblock`. Any pool software that already
+merge-mines Namecoin, Doichain or similar coins should work unchanged - just add a new
+aux chain with chain ID 16. (In the standard 32-slot merkle tree with nonce 0, chain ID 16
+lands in slot 14, so it does not clash with Namecoin, Doichain or Syscoin.)
+
+The CLC2 coinbase is built by the node and pays the address you give to `createauxblock`
+in full. There is no developer fee or required extra output (the only special rule is the
+declared premine, which applies to block 1 only and is long past).
+
+### Example node config (`~/.coiledcoin2/coiledcoin2.conf`)
+
+```ini
+server=1
+listen=1
+rpcbind=127.0.0.1
+rpcallowip=127.0.0.1
+rpcport=8371
+rpcuser=CHANGE_ME
+rpcpassword=CHANGE_ME_TOO
+addnode=clc2seed.shears.co.uk:8370
+```
+
+### Coin definition for NOMP-style pools
+
+```json
+{
+    "name": "CoiledCoin2",
+    "symbol": "CLC2",
+    "algorithm": "sha256",
+    "peerMagic": "",
+    "txMessages": false
+}
+```
+
+Use it as an **auxiliary (merged) chain** if your NOMP fork supports AuxPoW, or as a normal
+SHA-256 coin for direct mining. For direct (solo/PPLNS) mining, standard Bitcoin-family
+settings work in other pool software too (SHA-256d header, coinbase and block hashing,
+`getblocktemplate` with the `segwit` rule).
+
+**Direct mining note:** after merge-mining activation the chain ID lives in the block version
+(bits 16+), and the node rejects blocks with the wrong chain ID. If miners connect to you
+directly and use version rolling (ASICBoost, e.g. Bitaxe mask `1fffe000`), limit the
+version-rolling mask to bits 13-15 (`0000e000`) for CLC2, or the rolled bits will break the
+chain ID. Merge-mined blocks are not affected.
+
+### Get in touch
+
+Questions, or want to be listed as a CLC2 pool? Open an issue on this repository or post on
+[questions.shears.co.uk](https://questions.shears.co.uk). Please also add your pool on
+[MiningPoolStats](https://miningpoolstats.stream) once you're mining CLC2.
+
 ## Mining
 
 CoiledCoin II can be merge-mined alongside Bitcoin with no loss of Bitcoin hashrate, or
