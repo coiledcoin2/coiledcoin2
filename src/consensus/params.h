@@ -118,6 +118,22 @@ struct Params {
     int64_t nLWMAWindow{60};
     /** CoiledCoin II: fixed difficulty (compact) for the first nLWMAWindow blocks; 0 = powLimit */
     uint32_t nInitialBits{0};
+    /**
+     * CoiledCoin II v31.1.1: "ASERT with Shears StallGuard" from nASERTActivationHeight.
+     *  - step-by-step (relative) ASERT: each block's target follows the previous block's solve time,
+     *    halving/doubling per nASERTHalfLife seconds of difference from nPowTargetSpacing;
+     *  - Shears StallGuard: a block arriving more than nStallGuardDelay seconds after its parent may be
+     *    easier - the target doubles for every full nStallGuardStep seconds beyond the delay;
+     *  - floor: the difficulty never goes below nDifficultyFloorBits (compact target).
+     * The block at the activation height uses nASERTStartBits.
+     */
+    int nASERTActivationHeight{std::numeric_limits<int>::max()};
+    uint32_t nASERTStartBits{0};
+    int64_t nASERTHalfLife{30 * 60};
+    int64_t nStallGuardDelay{3 * 60 * 60};
+    int64_t nStallGuardStep{30 * 60};
+    uint32_t nDifficultyFloorBits{0};
+    bool IsASERTActive(int height) const { return height >= nASERTActivationHeight; }
     /** CoiledCoin II: block reward schedule */
     int64_t nInitialSubsidy{50 * 100000000LL};
     int64_t nMinSubsidy{0};          // floor the reward never drops below (0 = Bitcoin-style)

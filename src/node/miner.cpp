@@ -56,8 +56,8 @@ int64_t UpdateTime(CBlockHeader* pblock, const Consensus::Params& consensusParam
         pblock->nTime = nNewTime;
     }
 
-    // Updating time can change work required on testnet:
-    if (consensusParams.fPowAllowMinDifficultyBlocks) {
+    // Updating time can change work required on testnet, and with CoiledCoin II's StallGuard:
+    if (consensusParams.fPowAllowMinDifficultyBlocks || consensusParams.IsASERTActive(pindexPrev->nHeight + 1)) {
         pblock->nBits = GetNextWorkRequired(pindexPrev, pblock, consensusParams);
     }
 

@@ -69,6 +69,10 @@ AuxpowMiner::getCurrentBlock (ChainstateManager& chainman, Mining& miner,
     if (pblockCur == nullptr
         || pindexPrev != chainman.ActiveChain ().Tip ()
         || (mempool.GetTransactionsUpdated () != txUpdatedLast
+            && GetTime () - startTime > 60)
+        /* CoiledCoin II: StallGuard can ease the difficulty as time passes,
+           so work is rebuilt at least every minute.  */
+        || (chainman.GetConsensus ().IsASERTActive (chainman.ActiveTip ()->nHeight + 1)
             && GetTime () - startTime > 60))
       {
         if (pindexPrev != chainman.ActiveChain ().Tip ())

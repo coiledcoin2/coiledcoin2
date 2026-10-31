@@ -45,9 +45,97 @@ static unsigned int LwmaNextWorkRequired(const CBlockIndex* pindexLast, const Co
     return nextTarget.GetCompact();
 }
 
+// ASERT exponential step (aserti3-2d, Bitcoin Cash Node; Mark Lundeberg & Jonathan Toomim):
+// refTarget * 2^((nTimeDiff - nPowTargetSpacing * (nHeightDiff + 1)) / nHalfLife), using the
+// same integer cubic approximation as BCHN so every node gets exactly the same answer.
+arith_uint256 CalculateASERT(const arith_uint256& refTarget, int64_t nPowTargetSpacing, int64_t nTimeDiff,
+                             int64_t nHeightDiff, const arith_uint256& powLimit, int64_t nHalfLife) noexcept
+{
+    assert(refTarget > 0 && refTarget <= powLimit);
+    assert(nHeightDiff >= 0);
+    assert(nHalfLife > 0);
+    // keep the multiply below inside 256 bits: very easy targets (regtest) are scaled down first
+    int scaled = 0;
+    arith_uint256 ref = refTarget;
+    if (ref.bits() > 256 - 17) { scaled = ref.bits() - (256 - 17); ref >>= scaled; }
+
+    const int64_t exponent = ((nTimeDiff - nPowTargetSpacing * (nHeightDiff + 1)) * 65536) / nHalfLife;
+    static_assert(int64_t(-1) >> 1 == int64_t(-1), "ASERT algorithm needs arithmetic shift support");
+    int64_t shifts = exponent >> 16;
+    const auto frac = uint16_t(exponent);
+    const uint32_t factor = 65536 + ((
+        + 195766423245049ull * frac
+        + 971821376ull * frac * frac
+        + 5127ull * frac * frac * frac
+        + (1ull << 47)
+        ) >> 48);
+
+    arith_uint256 nextTarget = ref * factor;
+    shifts += scaled - 16;
+    if (shifts <= 0) {
+        nextTarget >>= (shifts < -256 ? 256 : -shifts);
+    } else if (shifts >= 256) {
+        return powLimit;
+    } else {
+        const arith_uint256 shifted = nextTarget << shifts;
+        if ((shifted >> shifts) != nextTarget) return powLimit;
+        nextTarget = shifted;
+    }
+    if (nextTarget == 0) nextTarget = arith_uint256(1);
+    if (nextTarget > powLimit) nextTarget = powLimit;
+    return nextTarget;
+}
+
+// CoiledCoin II v31.1.1 - "ASERT with Shears StallGuard".
+// pblock may be null (then StallGuard is not applied - used only where no block time is known).
+static unsigned int StallGuardNextWorkRequired(const CBlockIndex* pindexLast, const CBlockHeader* pblock,
+                                               const Consensus::Params& params)
+{
+    const arith_uint256 powLimit = UintToArith256(params.powLimit);
+    arith_uint256 floorTarget;
+    floorTarget.SetCompact(params.nDifficultyFloorBits ? params.nDifficultyFloorBits : powLimit.GetCompact());
+    if (floorTarget > powLimit || floorTarget == 0) floorTarget = powLimit;
+
+    arith_uint256 target;
+    const int nNextHeight = pindexLast->nHeight + 1;
+    if (nNextHeight == params.nASERTActivationHeight || pindexLast->pprev == nullptr) {
+        // the switch-over block restarts at a fixed, reachable difficulty
+        target.SetCompact(params.nASERTStartBits ? params.nASERTStartBits : floorTarget.GetCompact());
+    } else {
+        // step-by-step ASERT: follow how long the previous block took (no timetable to catch up)
+        arith_uint256 parentTarget;
+        parentTarget.SetCompact(pindexLast->nBits);
+        if (parentTarget == 0 || parentTarget > powLimit) parentTarget = powLimit;
+        int64_t solvetime = pindexLast->GetBlockTime() - pindexLast->pprev->GetBlockTime();
+        const int64_t limit = 365LL * 24 * 60 * 60;
+        if (solvetime < -limit) solvetime = -limit;
+        if (solvetime > limit) solvetime = limit;
+        target = CalculateASERT(parentTarget, params.nPowTargetSpacing, solvetime, 0, powLimit, params.nASERTHalfLife);
+    }
+
+    // Shears StallGuard: after a long wait for this block, it may be easier
+    if (pblock != nullptr && params.nStallGuardDelay > 0 && params.nStallGuardStep > 0) {
+        const int64_t wait = pblock->GetBlockTime() - pindexLast->GetBlockTime();
+        if (wait > params.nStallGuardDelay) {
+            const int64_t steps = (wait - params.nStallGuardDelay) / params.nStallGuardStep;
+            if (steps >= 256) {
+                target = floorTarget;
+            } else if (steps > 0) {
+                const arith_uint256 shifted = target << int(steps);
+                target = ((shifted >> int(steps)) != target) ? floorTarget : shifted;
+            }
+        }
+    }
+
+    // floor: never easier than nDifficultyFloorBits
+    if (target > floorTarget) target = floorTarget;
+    return target.GetCompact();
+}
+
 unsigned int GetNextWorkRequired(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params& params)
 {
     assert(pindexLast != nullptr);
+    if (params.IsASERTActive(pindexLast->nHeight + 1)) return StallGuardNextWorkRequired(pindexLast, pblock, params);
     if (params.fLWMA) return LwmaNextWorkRequired(pindexLast, params);
     unsigned int nProofOfWorkLimit = UintToArith256(params.powLimit).GetCompact();
 
@@ -123,6 +211,7 @@ unsigned int CalculateNextWorkRequired(const CBlockIndex* pindexLast, int64_t nF
 // or decrease beyond the permitted limits.
 bool PermittedDifficultyTransition(const Consensus::Params& params, int64_t height, uint32_t old_nbits, uint32_t new_nbits)
 {
+    if (params.IsASERTActive(int(height))) return true; // CoiledCoin II: ASERT + StallGuard change every block
     if (params.fLWMA) return true; // CoiledCoin II: LWMA changes every block
     if (params.fPowAllowMinDifficultyBlocks) return true;
 

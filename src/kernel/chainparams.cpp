@@ -26,6 +26,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <iterator>
 #include <map>
 #include <span>
@@ -102,6 +103,15 @@ public:
         consensus.fLWMA = true;
         consensus.nLWMAWindow = 60;
         consensus.nInitialBits = 0x1b00ffff;             // launch difficulty 65,536 for the first 60 blocks
+        // v31.1.1: "ASERT with Shears StallGuard" from block 9,925 (LWMA froze the chain at 9,924 on
+        // 31 Oct 2026 when a ~4.7 PH/s merge-miner left). Difficulty 1,000,000 = one 1.2 TH/s Bitaxe
+        // finds about one block an hour; it is both the restart difficulty and the floor.
+        consensus.nASERTActivationHeight = 9925;
+        consensus.nASERTStartBits = 0x1a10c6e6;          // difficulty ~1,000,000
+        consensus.nDifficultyFloorBits = 0x1a10c6e6;     // never easier than ~1,000,000
+        consensus.nASERTHalfLife = 30 * 60;              // 30 minutes
+        consensus.nStallGuardDelay = 3 * 60 * 60;        // StallGuard starts after 3 hours...
+        consensus.nStallGuardStep = 30 * 60;             // ...and halves the difficulty every 30 minutes
         consensus.fPowAllowMinDifficultyBlocks = false;
         consensus.enforce_BIP94 = false;
         consensus.fPowNoRetargeting = false;
@@ -585,6 +595,11 @@ public:
         consensus.fLWMA = true;
         consensus.nLWMAWindow = 10;
         consensus.nPowTargetSpacing = 2 * 60;
+        // ASERT + StallGuard: off on regtest unless -testactivationheight=stallguard@N; it then restarts
+        // at, and is floored at, the regtest minimum difficulty so tests can CPU-mine
+        consensus.nASERTActivationHeight = opts.stallguard_height >= 0 ? opts.stallguard_height : std::numeric_limits<int>::max();
+        consensus.nASERTStartBits = 0x207fffff;
+        consensus.nDifficultyFloorBits = 0x207fffff;
 
         consensus.nAuxpowStartHeight = 0;
         consensus.nAuxpowChainId = 16;

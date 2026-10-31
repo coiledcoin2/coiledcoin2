@@ -32,7 +32,7 @@ namespace node
  * Maximum amount of time that a block timestamp is allowed to exceed the
  * current time before the block will be accepted.
  */
-static constexpr int64_t MAX_FUTURE_BLOCK_TIME = 2 * 60 * 60;
+static constexpr int64_t MAX_FUTURE_BLOCK_TIME = 10 * 60; // CoiledCoin II v31.1.1: 10 minutes (Bitcoin: 2 hours), so block times cannot be pushed far ahead to game StallGuard
 
 /**
  * Timestamp window used as a grace period by code that compares external
