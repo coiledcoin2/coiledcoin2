@@ -143,6 +143,12 @@ public:
         nDefaultPort = 8370;
         nPruneAfterHeight = 100000;
         m_assumed_blockchain_size = 1;
+        // CoiledCoin II 31.1.2: mainnet was missing these (commitment_period 0 crashed the node
+        // when a peer offered a lower-work side chain). Anti-DoS memory settings only.
+        m_headers_sync_params = HeadersSyncParams{
+            .commitment_period = 673,
+            .redownload_buffer_size = 14460, // 14460/673 = ~21.5 commitments
+        };
         m_assumed_chain_state_size = 1;
 
         {
